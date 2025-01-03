@@ -30,12 +30,19 @@ class Segment(record):
         fill(result, len(seps) + 1, [])
         return result
 
-    def __init__(self, string: str, ln = 0, col = 0, file = '__main__', *, cache = True):
+    def __init__(self, string: str, ln = 0, col = 0, file = '', *, cache = True):
         self.string = string
-        self.ln = ln
-        self.col = col
-        self.file = file
-        if cache: Segment._cacheline(string, ln, file)
+        if not (ln or col or file):
+            self.ln = Segment._num_inline
+            self.col = 0
+            self.file = '<inline>'
+            Segment._num_inline += 1
+        else:
+            self.ln = ln
+            self.col = col
+            self.file = file
+        if cache:
+            self._cacheline()
 
     def __len__(self):
         return len(self.string)
@@ -89,11 +96,11 @@ class Segment(record):
         return self.string
 
     _cache = dict[str, list[str]]()
+    _num_inline = 0
 
-    @staticmethod
-    def _cacheline(string: str, ln: int, file: str):
-        if file not in Segment._cache:
-            Segment._cache[file] = []
-        lines = Segment._cache[file]
-        fill(lines, ln + 1, '')
-        lines[ln] = string
+    def _cacheline(self):
+        if self.file not in Segment._cache:
+            Segment._cache[self.file] = []
+        lines = Segment._cache[self.file]
+        fill(lines, self.ln + 1, '')
+        lines[self.ln] = self.string
