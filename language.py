@@ -2,8 +2,6 @@ import math, random, textwrap
 from .segment import Segment
 from .exceptions import ParseError, RuleError
 
-MAX_DEPTH = 10
-
 class Word(list[str]):
     def __repr__(self):
         return f'Word({super().__repr__()})'
@@ -12,6 +10,8 @@ class Word(list[str]):
         return ''.join(self)
 
 class Language:
+    MAX_DEPTH = 10
+
     def __init__(self):
         self.letters = dict[str, int]()
         self.classes = dict[str, Choices[str]]()
@@ -62,7 +62,7 @@ class Language:
         self.letters = {l: i for i, l in enumerate(letters)}
 
     def run_rule(self, name: str, depth = 0) -> Word:
-        if depth > MAX_DEPTH:
+        if depth > Language.MAX_DEPTH:
             raise RuleError('maximum recursion depth exceeded')
         if name not in self.rules:
             raise RuleError(f"rule '{name}' not defined")
@@ -77,7 +77,8 @@ class Language:
         return result
 
     def sort(self, words: list[Word], *, reverse = False):
-        key = lambda word: [self.letters[l] for l in word]
+        def key(word: Word):
+            return [self.letters.get(l, -1) for l in word]
         return sorted(words, key=key, reverse=reverse)
 
     def textify(self, sentences = 11, width = 70):
@@ -90,9 +91,60 @@ class Language:
         text = ' '.join(sentence() for _ in range(sentences))
         return textwrap.fill(text, width)
 
-    def update_longest(self, string: str):
+    def update_longest(self, string: str | Segment):
         if string[0] != '[' and len(string) > self.longest_segment:
             self.longest_segment = len(string)
+
+    def open(self, file: str, **kwargs):
+        for line in Segment.open(file, **kwargs):
+            self.parse(line)
+        return self
+
+    def parse(self, segment: str | Segment):
+        if isinstance(segment, str):
+            segment = Segment(segment)
+        lexed = segment.lex()
+        if not lexed:
+            pass
+        elif lexed[0] == 'letters':
+            self._parse_letters(lexed)
+        elif '=' in lexed:
+            self._parse_class(lexed)
+        elif '::' in lexed:
+            self._parse_rule(lexed)
+        elif '>' in lexed:
+            pass
+        else:
+            raise ParseError('invalid keyword', lexed[0])
+
+    def _parse_letters(self, lexed: list[Segment]):
+        lexed = self.normalize(lexed[1]) if len(lexed) == 2 else lexed[1:]
+        self.order_letters([str(l) for l in lexed])
+
+    def _parse_class(self, lexed: list[Segment]):
+        head, tail = Segment.partition(lexed, '=')
+        if len(head) != 1 or not tail:
+            raise ParseError('invalid class', lexed[0], highlight=False)
+        if len(tail) == 1:
+            tail = self.normalize(tail[0])
+        class_ = Choices[str]()
+        for letter in tail:
+            self.update_longest(letter)
+            class_.append(str(letter))
+        class_.natural_weights()
+        self.update_longest(head[0])
+        self.classes[str(head[0])] = class_
+
+    def _parse_rule(self, lexed: list[Segment]):
+        head, tail = Segment.partition(lexed, '::')
+        if len(head) != 1 or not tail:
+            raise ParseError('invalid rule', lexed[0], highlight=False)
+        rule = Choices[Word]()
+        for expr in tail:
+            rule.append(self.normalizew(expr))
+        rule.natural_weights()
+        self.update_longest(head[0])
+        self.rules[str(head[0])] = rule
 
 class Choices[T]:
     def __init__(self):
