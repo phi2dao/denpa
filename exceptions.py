@@ -4,6 +4,9 @@ class DenpaError(Exception):
     def exit(self):
         exit(f'{self.__class__.__name__}: {self}')
 
+class RuleError(DenpaError):
+    pass
+
 class ErrorWithSegment(DenpaError):
     def __init__(self, message: str, *segments: Segment, highlight = True):
         self.segments = segments
@@ -11,9 +14,10 @@ class ErrorWithSegment(DenpaError):
         super().__init__(message)
 
     def __str__(self):
+        msg = super().__str__()
         if not self.segments:
-            return super().__str__()
-        msg = f'{super().__str__()} in "{self.segments[0].file}", line {self.segments[0].ln + 1}'
+            return msg
+        msg += f' in "{self.segments[0].file}", line {self.segments[0].ln + 1}'
         line = self.segments[0].getline()
         msg += f'\n  {line}'
         if self.highlight:

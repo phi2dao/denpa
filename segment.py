@@ -4,15 +4,15 @@ class Segment(record):
     __match_args__ = ('string', 'ln', 'col', 'file')
 
     @staticmethod
-    def index(segments: list['Segment'], value: str):
+    def index(segments: list['Segment'], value: str, /):
         for i, seg in enumerate(segments):
             if seg == value:
                 return i
         raise ValueError(f"'{value}' is not in list")
 
     @staticmethod
-    def open(file: str):
-        with open(file, 'r', encoding='utf-8') as f:
+    def open(file: str, **kwargs):
+        with open(file, 'r', encoding='utf-8', **kwargs) as f:
             result = [Segment(line.strip(), i, 0, file) for i, line in enumerate(f)]
         return result
 
@@ -30,7 +30,7 @@ class Segment(record):
         fill(result, len(seps) + 1, [])
         return result
 
-    def __init__(self, string: str, ln = 0, col = 0, file = '', *, cache = True):
+    def __init__(self, string: str, ln = 0, col = 0, file = '__main__', *, cache = True):
         self.string = string
         self.ln = ln
         self.col = col
