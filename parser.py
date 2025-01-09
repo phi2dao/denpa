@@ -4,7 +4,7 @@ from .collections import Choices, Word
 from .exceptions import ParseError, ImportError
 
 from typing import TYPE_CHECKING
-if TYPE_CHECKING: from .language import Language
+if TYPE_CHECKING: from .language import Language, SoundChange
 
 OP = re.compile(r'=|::|>|/|_')
 WHITESPACE = re.compile(r'\s+')
@@ -12,7 +12,7 @@ COMMENT = re.compile(r'%.*$')
 
 class Parser:
     @staticmethod
-    def open(file: str):
+    def open(file: str, /):
         with open(file, 'r', encoding='utf-8') as f:
             return Parser(f.read(), file)
 
@@ -21,7 +21,7 @@ class Parser:
         self.tokens = [Token(line, i, 0) for i, line in enumerate(self.lines)]
         self.file = file
 
-    def parse(self, lang: 'Language'):
+    def parse(self, lang: 'Language', /):
         for line in self.tokens:
             lexed = line.lex()
             if not lexed:
@@ -34,12 +34,14 @@ class Parser:
                 self._parse_variable(lexed, lang)
             elif '::' in lexed:
                 self._parse_rule(lexed, lang)
+            elif '>' in lexed:
+                self._parse_sound_change(lexed, lang)
             else:
-                raise ParseError(f"unknown keyword '{lexed[0]}'", self, lexed[0])
+                raise ParseError(f"statement: unknown keyword '{lexed[0]}'", self, lexed[0])
 
     def _parse_import(self, line: list['Token'], lang: 'Language'):
         if len(line) < 2:
-            raise ImportError('invalid import: no files to import', self, line[0])
+            raise ImportError('no files to import', self, line[0])
         for file in line[1:]:
             try:
                 path = Path(self.file).parent / str(file)
@@ -49,17 +51,17 @@ class Parser:
 
     def _parse_letters(self, line: list['Token'], lang: 'Language'):
         if len(line) < 2:
-            raise ParseError("invalid statement: no letters after 'letters'", self, line[0])
+            raise ParseError("statement: no letters after 'letters'", self, line[0])
         letters = line[1].normalize(lang) if len(line) == 2 else line[1:]
         lang.update_letters(str(l) for l in letters)
 
     def _parse_variable(self, line: list['Token'], lang: 'Language'):
         head, op, tail = Token.partition(line, '=')
         if len(head) != 1:
-            raise ParseError(f'invalid variable: {len(head)} names, should be 1', self, op[0])
+            raise ParseError(f'variable: {len(head)} names, should be 1', self, op[0])
         head = head[0].text
         if not tail:
-            raise ParseError('invalid variable: no letters in variable', self, op[0])
+            raise ParseError('variable: no letters in variable', self, op[0])
         if len(tail) == 1:
             tail = tail[0].normalize(lang)
         var, natural = Choices[str](), True
@@ -74,10 +76,10 @@ class Parser:
     def _parse_rule(self, line: list['Token'], lang: 'Language'):
         head, op, tail = Token.partition(line, '::')
         if len(head) != 1:
-            raise ParseError(f'invalid rule: {len(head)} names, should be 1', self, op[0])
+            raise ParseError(f'rule: {len(head)} names, should be 1', self, op[0])
         head = head[0].text
         if not tail:
-            raise ParseError('invalid rule: no expressions in rule', self, op[0])
+            raise ParseError('rule: no expressions in rule', self, op[0])
         rule, natural = Choices[Word](), True
         for token in tail:
             pattern, weight = self._parse_weight(token)
@@ -91,12 +93,66 @@ class Parser:
         if '#' in token.text:
             parts = token.text.split('#')
             if len(parts) != 2:
-                raise ParseError(f'invalid weight: {len(parts)} part(s), should be 2', self, token)
+                raise ParseError(f'weight: {len(parts)} part(s), should be 2', self, token)
             try:
                 return parts[0], float(parts[1])
             except ValueError:
-                raise ParseError(f"invalid weight: '{parts[1]}' is not a number", self, token)
+                raise ParseError(f"weight: '{parts[1]}' is not a number", self, token)
         return token.text, 1.
+
+    def _parse_sound_change(self, line: list['Token'], lang: 'Language'):
+        from .language import SoundChange
+        sources, trans, targets, env, before, under, after = Token.partition(line, '>', '/', '_')
+        change = SoundChange(lang)
+        self._parse_transform(sources, trans[0], targets, change)
+        self._parse_environment(before, env + under, after, change)
+        lang.changes.append(change)
+
+    def _parse_transform(self, sources: list['Token'], op: 'Token', targets: list['Token'], change: 'SoundChange'):
+        from .language import Pattern
+        lens, lent = len(sources), len(targets)
+        if not lens and not lent:
+            raise ParseError('sound change: empty transform', self, op)
+        if not lens and lent > 1:
+            raise ParseError('sound change: multiple targets in insertion', self, targets[1])
+        if lent > 1 and lens != lent:
+            raise ParseError('sound change: sources and targets different length', self, op)
+        pats = [self._parse_transform_source(s, change) for s in sources]
+        patt = [self._parse_transform_target(t, change) for t in targets]
+        if pats and not patt:
+            patt.append(Pattern())
+        if pats and len(patt) == 1:
+            patt *= len(pats)
+        change.sources, change.targets = pats, patt
+
+    def _parse_transform_source(self, source: 'Token', change: 'SoundChange'):
+        tokens = source.normalize(change.language)
+        for token in tokens:
+            if token.text[0] in '@#$':
+                raise ParseError(f"sound change: '{token.text[0]}' in source", self, token)
+        return Token.pattern(tokens)
+
+    def _parse_transform_target(self, target: 'Token', change: 'SoundChange'):
+        tokens = target.normalize(change.language)
+        for token in tokens:
+            if token.text == '#':
+                raise ParseError("sound change: '#' in target", self, token)
+        return Token.pattern(tokens)
+
+    def _parse_environment(self, before: list['Token'], ops: list['Token'], after: list['Token'], change: 'SoundChange'):
+        lenb, leno, lena = len(before), len(ops), len(after)
+        if leno == 0 or lenb == 0:
+            return
+        if leno == 1 and lenb > 0:
+            raise ParseError("sound change: environment missing '_'", self, before[0])
+        if lenb > 1:
+            raise ParseError("sound change: environment: too many patterns before '_'", self, before[1])
+        if lena > 1:
+            raise ParseError("sound change: environment: too many patterns after '_'", self, after[1])
+        if before:
+            change.before = Token.pattern(before[0].normalize(change.language))
+        if after:
+            change.after = Token.pattern(after[0].normalize(change.language))
 
 @dataclasses.dataclass
 class Token:
@@ -126,6 +182,11 @@ class Token:
         while len(result) < (len(seps) * 2 + 1):
             result.append([])
         return result
+
+    @staticmethod
+    def pattern(tokens: list['Token'], /):
+        from .language import Pattern
+        return Pattern(str(t) for t in tokens)
 
     def __len__(self):
         return len(self.text)

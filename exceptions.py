@@ -13,6 +13,9 @@ class LanguageException(Exception):
 class RuleError(LanguageException):
     pass
 
+class SoundChangeError(LanguageException):
+    pass
+
 class ParseError(LanguageException):
     def __init__(self, message: str, /, parser: 'Parser', token: 'Token'):
         self.message = message
