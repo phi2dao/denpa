@@ -1,18 +1,20 @@
 import random, textwrap
 from typing import Iterable
+from .parser import Parser, Token
 from .collections import Choices, Word
 from .exceptions import RuleError
 
 MAX_DEPTH = 10
 
 class Language:
-    def __init__(self):
+    def __init__(self, file = '', /):
         self.letters: dict[str, int] = {}
-        self.reserved: set[str] = set()
         self.variables: dict[str, Choices[str]] = {}
-        self.rules: dict[str, Choices[list[str]]] = {}
+        self.rules: dict[str, Choices[Word]] = {}
+        self.segments: set[str] = set()
         self.longest_segment = 1
         self._start_rule = ''
+        if file: self.open(file)
 
     def generate(self, count = 1, /, *, sorted = False):
         if not self.rules:
@@ -38,14 +40,38 @@ class Language:
         key = lambda word: [self.letters.get(l, -1) for l in word]
         return sorted(words, key=key, reverse=reverse)
 
-    def update_letters(self, letters: Iterable[str], /):
-        self.letters = {l: i for i, l in enumerate(letters)}
+    def normalize(self, text: str, /):
+        return Word(str(t) for t in Token(text.strip()).normalize(self))
 
-    def reserve(self, segment: str, /):
+    def open(self, file: str, /):
+        Parser.open(file).parse(self)
+
+    def parse(self, text: str, /):
+        Parser(text).parse(self)
+
+    def update_letters(self, letters: Iterable[str], /):
+        self.letters.clear()
+        for i, l in enumerate(letters):
+            self._cache_segment(l)
+            self.letters[l] = i
+
+    def set_variable(self, name: str, variable: Choices[str], /):
+        self._cache_segment(name)
+        for letter in variable:
+            self._cache_segment(letter)
+        self.variables[name] = variable
+
+    def set_rule(self, name: str, rule: Choices[Word], /):
+        self._start_rule = ''
+        if name != 'word':
+            self._cache_segment(name)
+        self.rules[name] = rule
+
+    def _cache_segment(self, segment: str, /):
         length = len(segment)
-        if length <= 1 or segment == 'word':
+        if length <= 1:
             return
-        self.reserved.add(segment)
+        self.segments.add(segment)
         if length > self.longest_segment:
             self.longest_segment = length
 

@@ -6,7 +6,7 @@ parser.add_argument('language')
 parser.add_argument('lexicon', nargs='?')
 group = parser.add_mutually_exclusive_group()
 group.add_argument('-s', '--sorted', action='store_true')
-group.add_argument('-S', '--sorted--only', action='store_true')
+group.add_argument('-S', '--sorted-only', action='store_true')
 group = parser.add_mutually_exclusive_group()
 group.add_argument('-t', '--times', default=1, type=int, metavar='num')
 group.add_argument('-T', '--text', nargs='?', const=11, type=int, metavar='num')
@@ -15,9 +15,15 @@ args = parser.parse_args()
 sorted = args.sorted or args.sorted_only
 
 try:
-    lang = Language()
+    lang = Language(args.language)
     if args.lexicon:
-        pass
+        with open(args.lexicon, 'r', encoding='utf-8') as f:
+            words = [lang.normalize(line) for line in f]
+        if not args.sorted_only:
+            words = lang.apply(words)
+        if sorted:
+            words = lang.sorted(words)
+        print(*words, sep='\n')
     elif args.text:
         print(lang.textify(args.text))
     else:

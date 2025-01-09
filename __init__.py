@@ -6,5 +6,7 @@ __all__ = [
     'Language',
     'Word',
     'LanguageException',
-    'RuleError'
+    'RuleError',
+    'ParseError',
+    'ImportError',
 ]
